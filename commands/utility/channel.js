@@ -14,7 +14,6 @@ const {
     Routes,
 } = require("discord.js");
 const { REST } = require("@discordjs/rest");
-const { token } = require("../../config.json"); // Needed for REST
 const { setTimeout: wait } = require("node:timers/promises"); // For delays
 
 // Mapping command option names to permission flags

@@ -1,23 +1,32 @@
-const { SlashCommandBuilder, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags } = require("discord.js");
 
 module.exports = {
-    category: 'utility',
+    category: "utility",
     data: new SlashCommandBuilder()
-        .setName('invite')
-        .setDescription('Get invite links for bots.')
-        .addBooleanOption(option =>
-            option.setName('self')
-                .setDescription('Show invite for this bot only?')
-                .setRequired(true)),
+        .setName("invite")
+        .setDescription("Get invite links for bots.")
+        .addBooleanOption((option) =>
+            option
+                .setName("self")
+                .setDescription("Show invite for this bot only?")
+                .setRequired(true)
+        ),
 
     async execute(interaction) {
-        const showSelf = interaction.options.getBoolean('self');
+        const showSelf = interaction.options.getBoolean("self");
 
         if (showSelf) {
-            // Return the self-invite link
+            const inviteButton = new ButtonBuilder()
+                .setLabel("Add Bot to Server")
+                .setURL(
+                    "https://discord.com/oauth2/authorize?client_id=1360109607183323206&permissions=8&integration_type=0&scope=bot"
+                )
+                .setStyle(ButtonStyle.Link);
+            const row = new ActionRowBuilder().addComponents(inviteButton);
+
             await interaction.reply({
-                content: '[Invite](https://discord.com/oauth2/authorize?client_id=1360109607183323206&permissions=8&integration_type=0&scope=bot) <@868491392589127700> to your server',
-                flags: MessageFlags.Ephemeral | MessageFlags.SuppressEmbeds
+                content: "Click the button below to invite me to your server:",
+                components: [row],
             });
         } else {
             // Return the list of other bots
@@ -33,8 +42,39 @@ some useful free bot invite links
 - **[X Follow-Up](<https://discord.com/oauth2/authorize?client_id=1174332637322674186&permissions=2147862592&scope=bot%20applications.commands>)** - twitter notifications
 - **[Fredboat](<https://discord.com/oauth2/authorize?client_id=184405253028970496&scope=bot+identify&redirect_uri=https%3A%2F%2Ffredboat.com%2Fcallback%2Fmusic&response_type=code>)** - music
 - **[Tickets](<https://discord.com/oauth2/authorize?client_id=1325579039888511056&scope=bot+applications.commands&permissions=395942816984>)** - ticketing`,
-                flags: MessageFlags.Ephemeral | MessageFlags.SuppressEmbeds
+                flags: MessageFlags.Ephemeral | MessageFlags.SuppressEmbeds,
             });
         }
     },
-}; 
+};
+
+const {
+    SlashCommandBuilder,
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+} = require("discord.js");
+
+module.exports = {
+    data: new SlashCommandBuilder()
+        .setName("invite")
+        .setDescription("Get a link to invite this bot to your server"),
+
+    async execute(interaction) {
+        // Create an invite button
+        const inviteButton = new ButtonBuilder()
+            .setLabel("Add Bot to Server")
+            .setURL(
+                "https://discord.com/oauth2/authorize?client_id=896752618095902740"
+            )
+            .setStyle(ButtonStyle.Link);
+
+        // Add the button to an action row
+        const row = new ActionRowBuilder().addComponents(inviteButton);
+
+        await interaction.reply({
+            content: "Click the button below to invite me to your server:",
+            components: [row],
+        });
+    },
+};

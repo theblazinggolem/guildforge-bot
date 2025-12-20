@@ -119,7 +119,6 @@ module.exports = {
                 )
         )
 
-        // --- Preset Subcommand ---
         .addSubcommand((subcommand) =>
             subcommand
                 .setName("preset")
@@ -147,28 +146,24 @@ module.exports = {
                 )
         )
 
-        // --- List Subcommand ---
         .addSubcommand((subcommand) =>
             subcommand
                 .setName("list")
                 .setDescription("lists all roles in the server")
         )
 
-        // --- Color Subcommand ---
         .addSubcommand((subcommand) =>
             subcommand
                 .setName("color")
                 .setDescription("creates ~40 color roles")
         )
 
-        // --- Scrape Subcommand ---
         .addSubcommand((subcommand) =>
             subcommand
                 .setName("scrape")
                 .setDescription("scrapes server roles into a json file.")
         )
 
-        // --- Toggle Subcommand ---
         .addSubcommand((subcommand) =>
             subcommand
                 .setName("toggle")
@@ -187,7 +182,6 @@ module.exports = {
                 )
         )
 
-        // --- Manage Subcommand ---
         .addSubcommand((subcommand) => {
             subcommand
                 .setName("manage")
@@ -221,7 +215,6 @@ module.exports = {
                         .setDescription("Allow anyone to @mention this role?")
                 );
 
-            // Add individual permission options
             for (const [permName, flagBit] of Object.entries(rolePermissions)) {
                 subcommand.addStringOption((option) =>
                     option
@@ -236,7 +229,6 @@ module.exports = {
             return subcommand;
         })
 
-        // --- Clear Subcommand ---
         .addSubcommand((subcommand) =>
             subcommand
                 .setName("clear")
@@ -253,7 +245,6 @@ module.exports = {
                 )
         )
 
-        // --- Delete Subcommand ---
         .addSubcommand((subcommand) =>
             subcommand
                 .setName("delete")
@@ -268,9 +259,43 @@ module.exports = {
                         )
                         .setRequired(false)
                 )
+        )
+        .addSubcommand((subcommand) =>
+            subcommand
+                .setName("transfer")
+                .setDescription(
+                    "Transfers members from a secondary role to a primary role."
+                )
+                .addRoleOption((option) =>
+                    option
+                        .setName("primary_role")
+                        .setDescription("The role to assign to members.")
+                        .setRequired(true)
+                )
+                .addRoleOption((option) =>
+                    option
+                        .setName("secondary_role")
+                        .setDescription("The role to select members from.")
+                        .setRequired(true)
+                )
+                .addBooleanOption((option) =>
+                    option
+                        .setName("transcript")
+                        .setDescription(
+                            "Generate a .txt file of member IDs before transfer?"
+                        )
+                        .setRequired(false)
+                )
+                .addBooleanOption((option) =>
+                    option
+                        .setName("delete_secondary")
+                        .setDescription(
+                            "Delete the secondary role after transfer?"
+                        )
+                        .setRequired(false)
+                )
         ),
 
-    // --- Execute Function ---
     async execute(interaction) {
         if (
             !interaction.memberPermissions.has(
@@ -1100,6 +1125,145 @@ module.exports = {
                         content:
                             "An error occurred while deleting the role. Check my permissions and role hierarchy.",
                         flags: MessageFlags.Ephemeral,
+                    });
+                }
+            }
+            // ============================
+            // === TRANSFER Subcommand ===
+            // ============================
+            else if (subcommand === "transfer") {
+                const primaryRole = interaction.options.getRole("primary_role");
+                const secondaryRole =
+                    interaction.options.getRole("secondary_role");
+                const generateTranscript =
+                    interaction.options.getBoolean("transcript") || false;
+                const deleteSecondary =
+                    interaction.options.getBoolean("delete_secondary") || false;
+
+                // --- 1. Hierarchy & Permission Checks ---
+
+                // Check if the bot can manage these roles
+                if (
+                    primaryRole.position >=
+                        interaction.guild.members.me.roles.highest.position ||
+                    secondaryRole.position >=
+                        interaction.guild.members.me.roles.highest.position
+                ) {
+                    return interaction.editReply({
+                        content:
+                            "I cannot manage one or both of these roles because they are higher than or equal to my highest role.",
+                        flags: MessageFlags.Ephemeral,
+                    });
+                }
+
+                // Check if the user can manage these roles (prevent abuse)
+                if (interaction.user.id !== interaction.guild.ownerId) {
+                    if (
+                        primaryRole.position >=
+                            interaction.member.roles.highest.position ||
+                        secondaryRole.position >=
+                            interaction.member.roles.highest.position
+                    ) {
+                        return interaction.editReply({
+                            content:
+                                "You cannot manage one or both of these roles because they are higher than or equal to your highest role.",
+                            flags: MessageFlags.Ephemeral,
+                        });
+                    }
+                }
+
+                if (primaryRole.id === secondaryRole.id) {
+                    return interaction.editReply({
+                        content:
+                            "The primary and secondary roles cannot be the same.",
+                        flags: MessageFlags.Ephemeral,
+                    });
+                }
+
+                try {
+                    // --- 2. Fetch Members ---
+                    // Fetch all members to ensure cache is full so secondaryRole.members is accurate
+                    await interaction.guild.members.fetch();
+
+                    const membersToTransfer = secondaryRole.members;
+                    const memberCount = membersToTransfer.size;
+
+                    if (memberCount === 0) {
+                        return interaction.editReply({
+                            content: `No members found with the role ${secondaryRole}.`,
+                        });
+                    }
+
+                    await interaction.editReply({
+                        content: `Found ${memberCount} members with ${secondaryRole}. Starting transfer to ${primaryRole}...`,
+                    });
+
+                    // --- 3. Generate Transcript (Optional) ---
+                    let attachment = null;
+                    if (generateTranscript) {
+                        const idList = membersToTransfer
+                            .map((m) => m.id)
+                            .join("\n");
+                        const buffer = Buffer.from(idList, "utf-8");
+                        attachment = new AttachmentBuilder(buffer, {
+                            name: `${secondaryRole.name}_ids.txt`,
+                        });
+                    }
+
+                    // --- 4. Transfer Roles ---
+                    let successCount = 0;
+                    let failCount = 0;
+
+                    for (const [memberId, member] of membersToTransfer) {
+                        try {
+                            // Only add the role if they don't already have it
+                            if (!member.roles.cache.has(primaryRole.id)) {
+                                await member.roles.add(primaryRole);
+                            }
+                            successCount++;
+                        } catch (err) {
+                            console.error(
+                                `Failed to add role to ${member.user.tag}:`,
+                                err
+                            );
+                            failCount++;
+                        }
+                    }
+
+                    let resultMsg = `**Transfer Complete**\n- Successfully assigned ${primaryRole} to ${successCount} members.\n- Failed: ${failCount}`;
+
+                    // --- 5. Delete Secondary Role (Optional) ---
+                    if (deleteSecondary) {
+                        try {
+                            await secondaryRole.delete(
+                                `Role transfer command by ${interaction.user.tag}`
+                            );
+                            resultMsg += `\n**Secondary Role Deleted**: The role "${secondaryRole.name}" has been deleted from the server.`;
+                        } catch (err) {
+                            console.error(
+                                `Failed to delete role ${secondaryRole.name}:`,
+                                err
+                            );
+                            resultMsg += `\n**Deletion Failed**: Could not delete the secondary role. Check my permissions.`;
+                        }
+                    }
+
+                    // --- 6. Final Response ---
+                    const replyOptions = {
+                        content: resultMsg,
+                        flags: MessageFlags.Ephemeral,
+                    };
+                    if (attachment) {
+                        replyOptions.files = [attachment];
+                        replyOptions.content += `\n📄 **Transcript**: Attached is the list of member IDs who had the secondary role.`;
+                    }
+
+                    await interaction.editReply(replyOptions);
+                } catch (error) {
+                    console.error("Error executing transfer command:", error);
+                    await interaction.editReply({
+                        content:
+                            "An unexpected error occurred while processing the request.",
                     });
                 }
             }

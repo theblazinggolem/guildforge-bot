@@ -15,7 +15,7 @@ module.exports = {
             option
                 .setName("self")
                 .setDescription("Show invite for this bot only?")
-                .setRequired(true)
+                .setRequired(true),
         ),
 
     async execute(interaction) {
@@ -25,7 +25,7 @@ module.exports = {
             const inviteButton = new ButtonBuilder()
                 .setLabel("Add Bot to Server")
                 .setURL(
-                    "https://discord.com/oauth2/authorize?client_id=1360109607183323206&permissions=8&integration_type=0&scope=bot"
+                    "https://discord.com/oauth2/authorize?client_id=1360109607183323206&permissions=8&integration_type=0&scope=bot",
                 )
                 .setStyle(ButtonStyle.Link);
             const row = new ActionRowBuilder().addComponents(inviteButton);

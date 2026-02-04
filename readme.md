@@ -55,7 +55,10 @@ A complete suite for handling server roles.
 -   **/role clear**
     -   Strips all permissions from a target role.
 -   **/role delete**
-    -   Deletes a specified role from the server.
+    -   Deletes roles from the server. Supports three modes:
+        -   **Single:** Select a specific role to delete.
+        -   **Range:** Deletes all roles strictly between two boundary roles (`start_role` and `end_role`).
+        -   **Bulk:** Leave options empty to open a multi-select menu to delete up to 10 roles at once.
 
 ### wm Server Aesthetics (`/divider`)
 

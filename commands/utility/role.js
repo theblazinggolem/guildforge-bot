@@ -249,13 +249,29 @@ module.exports = {
             subcommand
                 .setName("delete")
                 .setDescription(
-                    "delete a role or multiple roles from the server"
+                    "Delete roles: single target, selection menu, or a range."
                 )
                 .addRoleOption((option) =>
                     option
                         .setName("target")
                         .setDescription(
-                            "the role to delete (leave empty to select multiple roles)"
+                            "The role to delete (leave empty to select multiple roles)"
+                        )
+                        .setRequired(false)
+                )
+                .addRoleOption((option) =>
+                    option
+                        .setName("start_role")
+                        .setDescription(
+                            "Boundary role 1 for range deletion (exclusive)"
+                        )
+                        .setRequired(false)
+                )
+                .addRoleOption((option) =>
+                    option
+                        .setName("end_role")
+                        .setDescription(
+                            "Boundary role 2 for range deletion (exclusive)"
                         )
                         .setRequired(false)
                 )
@@ -600,7 +616,7 @@ module.exports = {
                                         "\n(Delete button timed out)",
                                     components: [row],
                                 })
-                                .catch(() => {});
+                                .catch(() => { });
                         }
                     });
                 } catch (collectorError) {
@@ -683,7 +699,7 @@ module.exports = {
             // Optional: Check if command user's highest role is high enough
             if (
                 roleToToggle.position >=
-                    interaction.member.roles.highest.position &&
+                interaction.member.roles.highest.position &&
                 interaction.guild.ownerId !== interaction.user.id
             ) {
                 return interaction.editReply({
@@ -832,9 +848,8 @@ module.exports = {
                 if (permissionsModified) changes.push("permissions updated");
 
                 await interaction.editReply({
-                    content: `Successfully updated role <@&${
-                        targetRole.id
-                    }> (${changes.join(", ")}).`,
+                    content: `Successfully updated role <@&${targetRole.id
+                        }> (${changes.join(", ")}).`,
                     flags: MessageFlags.Ephemeral,
                 });
             } catch (error) {
@@ -871,7 +886,7 @@ module.exports = {
                 if (
                     interaction.user.id !== interaction.guild.ownerId &&
                     targetRole.position >=
-                        interaction.member.roles.highest.position
+                    interaction.member.roles.highest.position
                 ) {
                     return interaction.editReply({
                         content: `You cannot modify the role ${targetRole.name} because it's higher than or equal to your highest role.`,
@@ -983,9 +998,9 @@ module.exports = {
 
                             if (
                                 interaction.user.id !==
-                                    interaction.guild.ownerId &&
+                                interaction.guild.ownerId &&
                                 role.position >=
-                                    interaction.member.roles.highest.position
+                                interaction.member.roles.highest.position
                             ) {
                                 skippedCount++;
                                 skippedRoles.push(role.name);
@@ -1052,7 +1067,7 @@ module.exports = {
                                     components: [],
                                     flags: MessageFlags.Ephemeral,
                                 })
-                                .catch(() => {});
+                                .catch(() => { });
                         }
                     });
                 } catch (error) {
@@ -1070,9 +1085,180 @@ module.exports = {
         // ============================
         else if (subcommand === "delete") {
             const targetRole = interaction.options.getRole("target");
+            const startRole = interaction.options.getRole("start_role");
+            const endRole = interaction.options.getRole("end_role");
 
+            // ============================
+            // === RANGE Deletion Logic ===
+            // ============================
+            if (startRole || endRole) {
+                if (!startRole || !endRole) {
+                    return interaction.editReply({
+                        content:
+                            "To delete a range of roles, you must specify both `start_role` and `end_role`.",
+                        flags: MessageFlags.Ephemeral,
+                    });
+                }
+
+                if (startRole.id === endRole.id) {
+                    return interaction.editReply({
+                        content:
+                            "The start and end roles cannot be the same for range deletion.",
+                        flags: MessageFlags.Ephemeral,
+                    });
+                }
+
+                const pos1 = startRole.position;
+                const pos2 = endRole.position;
+                const lowPos = Math.min(pos1, pos2);
+                const highPos = Math.max(pos1, pos2);
+
+                // Filter roles strictly between the two boundary roles
+                const rolesInRange = interaction.guild.roles.cache.filter(
+                    (r) => r.position > lowPos && r.position < highPos
+                );
+
+                if (rolesInRange.size === 0) {
+                    return interaction.editReply({
+                        content: `No roles found between **${startRole.name}** and **${endRole.name}**.`,
+                        flags: MessageFlags.Ephemeral,
+                    });
+                }
+
+                // Identify deleteable vs skipped roles
+                const rolesToDelete = [];
+                const skippedRoles = [];
+
+                for (const [, role] of rolesInRange) {
+                    // Hierarchy checks
+                    const botHighest =
+                        interaction.guild.members.me.roles.highest;
+                    const userHighest = interaction.member.roles.highest;
+
+                    if (role.position >= botHighest.position) {
+                        skippedRoles.push(`${role.name} (Higher than Bot)`);
+                        continue;
+                    }
+                    if (
+                        interaction.user.id !== interaction.guild.ownerId &&
+                        role.position >= userHighest.position
+                    ) {
+                        skippedRoles.push(`${role.name} (Higher than User)`);
+                        continue;
+                    }
+                    if (role.managed) {
+                        skippedRoles.push(`${role.name} (Managed/Integration)`);
+                        continue;
+                    }
+                    rolesToDelete.push(role);
+                }
+
+                if (rolesToDelete.length === 0) {
+                    const params = skippedRoles.length
+                        ? `\nSkipped: ${skippedRoles.join(", ")}`
+                        : "";
+                    return interaction.editReply({
+                        content: `Found ${rolesInRange.size} roles between boundaries, but none can be deleted.${params}`,
+                        flags: MessageFlags.Ephemeral,
+                    });
+                }
+
+                // Sort for display
+                rolesToDelete.sort((a, b) => b.position - a.position);
+                const roleNames = rolesToDelete.map((r) => r.name).join(", ");
+
+                // Confirmation UI
+                const confirmRow = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder()
+                        .setCustomId("confirm-range-delete")
+                        .setLabel("Confirm Range Deletion")
+                        .setStyle(ButtonStyle.Danger),
+                    new ButtonBuilder()
+                        .setCustomId("cancel-range-delete")
+                        .setLabel("Cancel")
+                        .setStyle(ButtonStyle.Secondary)
+                );
+
+                const response = await interaction.editReply({
+                    content:
+                        `Found **${rolesInRange.size}** roles between **${startRole.name}** and **${endRole.name}**.\n` +
+                        `**Roles to delete (${rolesToDelete.length}):** ${roleNames}\n` +
+                        (skippedRoles.length > 0
+                            ? `⚠️ **Skipped (${skippedRoles.length}):** ${skippedRoles.join(", ")}\n`
+                            : "") +
+                        `\n**Are you sure you want to delete these roles? This cannot be undone.**`,
+                    components: [confirmRow],
+                    flags: MessageFlags.Ephemeral,
+                });
+
+                try {
+                    const confirmation = await response.awaitMessageComponent({
+                        filter: (i) =>
+                            (i.customId === "confirm-range-delete" ||
+                                i.customId === "cancel-range-delete") &&
+                            i.user.id === interaction.user.id,
+                        time: 30000,
+                    });
+
+                    if (confirmation.customId === "cancel-range-delete") {
+                        await confirmation.update({
+                            content: "Range deletion cancelled.",
+                            components: [],
+                        });
+                        return;
+                    }
+
+                    // Proceed with deletion
+                    await confirmation.update({
+                        content: `Deleting ${rolesToDelete.length} roles...`,
+                        components: [],
+                    });
+
+                    let successCount = 0;
+                    let failCount = 0;
+                    const failedNames = [];
+
+                    for (const role of rolesToDelete) {
+                        try {
+                            // Re-check existence just in case
+                            if (interaction.guild.roles.cache.has(role.id)) {
+                                await role.delete(
+                                    `Range delete by ${interaction.user.tag}`
+                                );
+                                successCount++;
+                            }
+                        } catch (err) {
+                            failCount++;
+                            failedNames.push(role.name);
+                            console.error(`Failed to delete ${role.name}:`, err);
+                        }
+                    }
+
+                    await interaction.editReply({
+                        content:
+                            `**Range Deletion Complete**\n` +
+                            `✅ Successfully deleted: ${successCount}\n` +
+                            (failCount > 0
+                                ? `❌ Failed: ${failCount} (${failedNames.join(
+                                    ", "
+                                )})`
+                                : ""),
+                        components: [],
+                    });
+                } catch (e) {
+                    // Timeout or other error
+                    await interaction.editReply({
+                        content: "Confirmation timed out or an error occurred.",
+                        components: [],
+                    });
+                }
+            }
+
+            // ============================
+            // === Single Target Logic ===
+            // ============================
             // If a role was provided directly
-            if (targetRole) {
+            else if (targetRole) {
                 // Role hierarchy checks
                 if (
                     targetRole.position >=
@@ -1087,7 +1273,7 @@ module.exports = {
                 if (
                     interaction.user.id !== interaction.guild.ownerId &&
                     targetRole.position >=
-                        interaction.member.roles.highest.position
+                    interaction.member.roles.highest.position
                 ) {
                     return interaction.editReply({
                         content: `You cannot delete the role ${targetRole.name} because it's higher than or equal to your highest role.`,
@@ -1145,9 +1331,9 @@ module.exports = {
                 // Check if the bot can manage these roles
                 if (
                     primaryRole.position >=
-                        interaction.guild.members.me.roles.highest.position ||
+                    interaction.guild.members.me.roles.highest.position ||
                     secondaryRole.position >=
-                        interaction.guild.members.me.roles.highest.position
+                    interaction.guild.members.me.roles.highest.position
                 ) {
                     return interaction.editReply({
                         content:
@@ -1160,9 +1346,9 @@ module.exports = {
                 if (interaction.user.id !== interaction.guild.ownerId) {
                     if (
                         primaryRole.position >=
-                            interaction.member.roles.highest.position ||
+                        interaction.member.roles.highest.position ||
                         secondaryRole.position >=
-                            interaction.member.roles.highest.position
+                        interaction.member.roles.highest.position
                     ) {
                         return interaction.editReply({
                             content:
@@ -1351,7 +1537,7 @@ module.exports = {
                                     components: [],
                                     flags: MessageFlags.Ephemeral,
                                 })
-                                .catch(() => {});
+                                .catch(() => { });
                         } else if (reason === "roles_selected") {
                             // Start the confirmation collector
                             const confirmCollector =
@@ -1415,10 +1601,10 @@ module.exports = {
 
                                         if (
                                             interaction.user.id !==
-                                                interaction.guild.ownerId &&
+                                            interaction.guild.ownerId &&
                                             role.position >=
-                                                interaction.member.roles.highest
-                                                    .position
+                                            interaction.member.roles.highest
+                                                .position
                                         ) {
                                             skippedCount++;
                                             skippedRoles.push(
@@ -1442,8 +1628,7 @@ module.exports = {
                                             successCount++;
                                         } catch (error) {
                                             console.error(
-                                                `Error deleting role ${
-                                                    role?.name || "unknown"
+                                                `Error deleting role ${role?.name || "unknown"
                                                 } (${role?.id || "unknown"}):`,
                                                 error
                                             );
@@ -1487,7 +1672,7 @@ module.exports = {
                                             components: [],
                                             flags: MessageFlags.Ephemeral,
                                         })
-                                        .catch(() => {});
+                                        .catch(() => { });
                                 }
                             });
                         }
